@@ -1,0 +1,20 @@
+client_0  | 2026/09/02 03:20:01 INFO action=connect-to-server result=in-progress
+client_0  | 2026/09/02 03:20:01 WARN action=connect-to-server result=fail attempt=0
+client_0  | 2026/09/02 03:20:01 INFO action=connect-to-server result=success
+client_0  | 2026/09/02 03:20:01 INFO action=test-echo-server result=in-progress agency-id=0 message-id=0
+client_0  | 2026/09/02 03:20:02 INFO action=test-echo-server result=in-progress agency-id=0 message-id=1
+client_0  | 2026/09/02 03:20:03 INFO action=test-echo-server result=in-progress agency-id=0 message-id=2
+client_0  | 2026/09/02 03:20:04 INFO action=test-echo-server result=success agency-id=0
+client_0  | 2026/09/02 03:20:56 INFO action=connect-to-server result=in-progress
+client_0  | 2026/09/02 03:20:56 WARN action=connect-to-server result=fail attempt=0
+client_0  | 2026/09/02 03:20:56 WARN action=connect-to-server result=fail attempt=1
+client_0  | 2026/09/02 03:20:56 INFO action=connect-to-server result=success
+client_0  | 2026/09/02 03:20:56 INFO action=test-echo-server result=in-progress agency-id=0 message-id=0
+client_0  | 2026/09/02 03:20:57 INFO action=test-echo-server result=in-progress agency-id=0 message-id=1
+client_0  | 2026/09/02 03:20:58 INFO action=test-echo-server result=in-progress agency-id=0 message-id=2
+client_0  | 2026/09/02 03:20:59 INFO action=test-echo-server result=success agency-id=0
+server    | 2026/09/02 03:20:56 INFO action=accept-connection result=in-progress 
+server    | 2026/09/02 03:20:56 INFO action=accept-connection result=success 
+server    | 2026/09/02 03:20:56 INFO action=handle-client result=in-progress 
+server    | 2026/09/02 03:20:59 INFO action=handle-client result=success messages-amount=3
+server    | 2026/09/02 03:20:59 INFO action=accept-connection result=in-progress 
