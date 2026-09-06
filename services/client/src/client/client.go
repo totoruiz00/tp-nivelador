@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
@@ -20,6 +21,7 @@ type ClientConfig struct {
 	AgencyId   string
 	InputFile  string
 	OutputFile string
+	BatchSize  int
 }
 
 type Client struct {
@@ -89,31 +91,29 @@ func (client *Client) Run() error {
 
 	scanner := bufio.NewScanner(inputFile)
 	betsAmount := 0
+	batchLines := []string{}
 	for scanner.Scan() {
-		betArgs := []any{"agency-id", client.config.AgencyId, "bet-id", betsAmount}
 		betLine := scanner.Text()
-
-		if err := protocol.SendMessage(client.conn, betLine); err != nil {
-			logger.Error("send-bet", logger.Fail, betArgs...)
-			return err
-		}
-
-		ackPayload, err := protocol.RecvMessage(client.conn)
-		if err != nil {
-			logger.Error("recv-ack", logger.Fail, betArgs...)
-			return err
-		}
-		if ackPayload != protocol.ACK_MESSAGE {
-			logger.Error("recv-ack", logger.Fail, betArgs...)
-			return errors.New("el servidor no confirmo la apuesta")
-		}
-
+		batchLines = append(batchLines, betLine)
 		betsAmount++
+
+		if len(batchLines) == client.config.BatchSize {
+			if err := client.sendBatch(batchLines); err != nil {
+				return err
+			}
+			batchLines = []string{}
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		logger.Error("read-input-file", logger.Fail, "err", err)
 		return err
+	}
+
+	if len(batchLines) > 0 {
+		if err := client.sendBatch(batchLines); err != nil {
+			return err
+		}
 	}
 
 	if err := protocol.SendMessage(client.conn, protocol.FIN_MESSAGE); err != nil {
@@ -151,6 +151,27 @@ func (client *Client) Run() error {
 		"bets-amount", betsAmount,
 		"winners-amount", winnersAmount,
 	)
+
+	return nil
+}
+
+func (client *Client) sendBatch(batchLines []string) error {
+	batchPayload := strings.Join(batchLines, "\n")
+
+	if err := protocol.SendMessage(client.conn, batchPayload); err != nil {
+		logger.Error("send-batch", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
+
+	ackPayload, err := protocol.RecvMessage(client.conn)
+	if err != nil {
+		logger.Error("recv-ack", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
+	if ackPayload != protocol.ACK_MESSAGE {
+		logger.Error("recv-ack", logger.Fail, "agency-id", client.config.AgencyId)
+		return errors.New("el servidor no confirmo el batch")
+	}
 
 	return nil
 }

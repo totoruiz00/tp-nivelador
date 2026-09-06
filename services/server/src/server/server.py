@@ -25,17 +25,21 @@ class Server:
                     if payload == protocol.FIN_MESSAGE:
                         break
 
-                    fields = payload.split(",")
-                    first_name = fields[0]
-                    last_name = fields[1]
-                    document = int(fields[2])
-                    birthdate = fields[3]
-                    number = int(fields[4])
-                    bet = Bet(agency_id, first_name, last_name, document, birthdate, number)
+                    batch_lines = payload.split("\n")
+                    batch_bets = []
+                    for line in batch_lines:
+                        fields = line.split(",")
+                        first_name = fields[0]
+                        last_name = fields[1]
+                        document = int(fields[2])
+                        birthdate = fields[3]
+                        number = int(fields[4])
+                        bet = Bet(agency_id, first_name, last_name, document, birthdate, number)
+                        batch_bets.append(bet)
 
-                    self.lottery.store_bets([bet])
+                    self.lottery.store_bets(batch_bets)
                     protocol.send_message(client_socket, protocol.ACK_MESSAGE)
-                    bets_amount += 1
+                    bets_amount += len(batch_bets)
 
                 winning_bets = []
                 all_bets = self.lottery.load_bets()
