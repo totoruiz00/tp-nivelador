@@ -1,14 +1,36 @@
 import socket
+import threading
 import logger
 import protocol
 from lottery import Lottery, Bet
 
 
 class Server:
-    def __init__(self, server_host: str, server_port: int, lottery: Lottery) -> None:
+    def __init__(
+        self,
+        server_host: str,
+        server_port: int,
+        lottery: Lottery,
+        agency_quorum_min: int,
+    ) -> None:
         self.server_host = server_host
         self.server_port = server_port
         self.lottery = lottery
+        self.agency_quorum_min = agency_quorum_min
+
+        self.lock = threading.Lock()
+        self.quorum_condition = threading.Condition(self.lock)
+        self.finished_agencies = set()
+
+    def _wait_for_quorum(self, agency_id: int) -> None:
+        with self.quorum_condition:
+            self.finished_agencies.add(agency_id)
+
+            if len(self.finished_agencies) >= self.agency_quorum_min:
+                self.quorum_condition.notify_all()
+            else:
+                while len(self.finished_agencies) < self.agency_quorum_min:
+                    self.quorum_condition.wait()
 
     def _handle_client(self, client_socket):
         action = "handle-client"
@@ -37,16 +59,20 @@ class Server:
                         bet = Bet(agency_id, first_name, last_name, document, birthdate, number)
                         batch_bets.append(bet)
 
-                    self.lottery.store_bets(batch_bets)
+                    with self.lock:
+                        self.lottery.store_bets(batch_bets)
                     protocol.send_message(client_socket, protocol.ACK_MESSAGE)
                     bets_amount += len(batch_bets)
 
+                self._wait_for_quorum(agency_id)
+
                 winning_bets = []
-                all_bets = self.lottery.load_bets()
-                for bet in all_bets:
-                    if bet.agency_id == agency_id:
-                        if self.lottery.has_won(bet):
-                            winning_bets.append(bet)
+                with self.lock:
+                    all_bets = self.lottery.load_bets()
+                    for bet in all_bets:
+                        if bet.agency_id == agency_id:
+                            if self.lottery.has_won(bet):
+                                winning_bets.append(bet)
 
                 for bet in winning_bets:
                     row = (
@@ -89,4 +115,7 @@ class Server:
                     raise e
                 logger.info(action, logger.LogResult.success)
 
-                self._handle_client(client_socket)
+                client_thread = threading.Thread(
+                    target=self._handle_client, args=(client_socket,)
+                )
+                client_thread.start()
