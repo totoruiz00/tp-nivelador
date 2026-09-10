@@ -61,6 +61,10 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+func (client *Client) Stop() {
+	client.conn.Close()
+}
+
 func (client *Client) Run() error {
 	const mainAction = "process-bets"
 	defer client.conn.Close()

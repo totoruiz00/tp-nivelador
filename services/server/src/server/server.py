@@ -1,8 +1,12 @@
 import socket
+import signal
 import threading
+import time
 import logger
 import protocol
 from lottery import Lottery, Bet
+
+SHUTDOWN_TIMEOUT_SECONDS = 4
 
 
 class Server:
@@ -22,7 +26,30 @@ class Server:
         self.quorum_condition = threading.Condition(self.lock)
         self.finished_agencies = set()
 
-    def _wait_for_quorum(self, agency_id: int) -> None:
+        self.shutdown_event = threading.Event()
+        self.server_socket = None
+        self.client_sockets = set()
+        self.client_threads = []
+
+    def _handle_sigterm(self, signum, frame):
+        logger.info("sigterm", logger.LogResult.in_progress)
+        self.shutdown_event.set()
+
+        with self.quorum_condition:
+            self.quorum_condition.notify_all()
+
+        with self.lock:
+            for client_socket in self.client_sockets:
+                try:
+                    client_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                client_socket.close()
+
+        if self.server_socket is not None:
+            self.server_socket.close()
+
+    def _wait_for_quorum(self, agency_id: int) -> bool:
         with self.quorum_condition:
             self.finished_agencies.add(agency_id)
 
@@ -30,7 +57,11 @@ class Server:
                 self.quorum_condition.notify_all()
             else:
                 while len(self.finished_agencies) < self.agency_quorum_min:
+                    if self.shutdown_event.is_set():
+                        return False
                     self.quorum_condition.wait()
+
+            return not self.shutdown_event.is_set()
 
     def _handle_client(self, client_socket):
         action = "handle-client"
@@ -64,7 +95,9 @@ class Server:
                     protocol.send_message(client_socket, protocol.ACK_MESSAGE)
                     bets_amount += len(batch_bets)
 
-                self._wait_for_quorum(agency_id)
+                quorum_reached = self._wait_for_quorum(agency_id)
+                if not quorum_reached:
+                    return
 
                 winning_bets = []
                 with self.lock:
@@ -100,22 +133,59 @@ class Server:
             except Exception as e:
                 logger.error(action, logger.LogResult.fail, "bets-amount", bets_amount)
                 raise e
+            finally:
+                with self.lock:
+                    self.client_sockets.discard(client_socket)
 
     def run(self):
         action = "accept-connection"
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+            self.server_socket = server_socket
             server_socket.bind((self.server_host, self.server_port))
             server_socket.listen()
             while True:
                 try:
                     logger.info(action, logger.LogResult.in_progress)
                     client_socket, _ = server_socket.accept()
-                except Exception as e:
+                except OSError as e:
+                    if self.shutdown_event.is_set():
+                        break
                     logger.error(action, logger.LogResult.fail)
                     raise e
                 logger.info(action, logger.LogResult.success)
 
+                with self.lock:
+                    self.client_sockets.add(client_socket)
+
                 client_thread = threading.Thread(
-                    target=self._handle_client, args=(client_socket,)
+                    target=self._handle_client, args=(client_socket,), daemon=True
                 )
                 client_thread.start()
+
+                still_running_threads = []
+                for thread in self.client_threads:
+                    if thread.is_alive():
+                        still_running_threads.append(thread)
+                self.client_threads = still_running_threads
+                self.client_threads.append(client_thread)
+
+        shutdown_deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
+        threads_still_running = 0
+        for client_thread in self.client_threads:
+            remaining_seconds = shutdown_deadline - time.monotonic()
+            if remaining_seconds > 0:
+                client_thread.join(timeout=remaining_seconds)
+            if client_thread.is_alive():
+                threads_still_running += 1
+
+        if threads_still_running > 0:
+            logger.error(
+                "sigterm",
+                logger.LogResult.fail,
+                "threads-still-running",
+                threads_still_running,
+            )
+        else:
+            logger.info("sigterm", logger.LogResult.success)
